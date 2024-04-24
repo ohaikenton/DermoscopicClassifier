@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -26,13 +27,16 @@ test_transforms = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
+print("Loading datasets...")
 # Load the training and test datasets
 train_dataset = datasets.ImageFolder(os.path.join(dataset_path, 'Train'), transform=train_transforms)
 test_dataset = datasets.ImageFolder(os.path.join(dataset_path, 'Test'), transform=test_transforms)
 
+print("Creating data loaders...")
 # Create data loaders
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+
 
 # Define the CNN model
 class CNNModel(nn.Module):
@@ -43,7 +47,11 @@ class CNNModel(nn.Module):
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
         self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
         self.conv4 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
-        self.fc1 = nn.Linear(256 * 8 * 8, 512)
+
+        # Calculate the size of the tensor after the last pooling layer
+        self.fc_size = 256 * (img_size // 16) * (img_size // 16)
+
+        self.fc1 = nn.Linear(self.fc_size, 512)
         self.fc2 = nn.Linear(512, num_classes)
 
     def forward(self, x):
@@ -51,11 +59,15 @@ class CNNModel(nn.Module):
         x = self.pool(nn.functional.relu(self.conv2(x)))
         x = self.pool(nn.functional.relu(self.conv3(x)))
         x = self.pool(nn.functional.relu(self.conv4(x)))
-        x = x.view(-1, 256 * 8 * 8)
+
+        x = x.view(-1, self.fc_size)
+
         x = nn.functional.relu(self.fc1(x))
         x = self.fc2(x)
         return x
 
+
+print("Creating CNN model...")
 # Create an instance of the CNN model
 model = CNNModel()
 
@@ -68,10 +80,13 @@ num_epochs = 50
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model.to(device)
 
+print("Starting training...")
 for epoch in range(num_epochs):
+    start_time = time.time()
+
     model.train()
     running_loss = 0.0
-    for images, labels in train_loader:
+    for i, (images, labels) in enumerate(train_loader):
         images = images.to(device)
         labels = labels.to(device)
 
@@ -83,8 +98,20 @@ for epoch in range(num_epochs):
 
         running_loss += loss.item()
 
-    print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(train_loader):.4f}')
+        # if (i + 1) % 10 == 0:
+        #     print(f'Epoch [{epoch + 1}/{num_epochs}], Step [{i + 1}/{len(train_loader)}], Loss: {loss.item():.4f}')
 
+    epoch_loss = running_loss / len(train_loader)
+    end_time = time.time()
+    epoch_time = end_time - start_time
+
+    print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {epoch_loss:.4f}, Time: {epoch_time:.2f}s')
+
+print("Training completed. Saving the trained model...")
+# Save the trained model
+torch.save(model.state_dict(), 'trained_model.pth')
+
+print("Evaluating the model on the test data...")
 # Evaluate the model on the test data
 model.eval()
 correct = 0
